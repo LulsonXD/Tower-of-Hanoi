@@ -1,0 +1,370 @@
+#include <iostream>
+#include <chrono>
+#include <conio.h>
+
+#include "conutils.h"
+
+
+char ch = 220;
+
+class Ring {
+public:
+    int width_;
+    console_color_t color_;
+    Ring* prev_;
+    Ring(int width, console_color_t color) : width_(width), color_(color) {}
+};
+
+class Tower_stack {
+    int size_ = 0;
+    Ring* top_ = nullptr;
+    Ring* itr_ = nullptr;
+public:
+    void push(int width, console_color_t color) {
+        if (top_ == nullptr) {
+            top_ = new Ring(width, color);
+        }
+        else {
+            Ring* tmp = new Ring(width, color);
+            tmp->prev_ = top_;
+            top_ = tmp;
+        }
+        ++size_;
+    }
+
+    Ring* pop() {
+        Ring* tmp = top_;
+        top_ = tmp->prev_;
+        itr_ = top_;
+        --size_;
+        return tmp;
+    }
+
+    Ring* peek() {
+        return top_;
+    }
+
+    int get_size() {
+        return size_;
+    }
+};
+
+enum tower_type {
+    standard,
+    colored,
+    magnetic,
+    unknown
+};
+
+class Tower {
+    int x_;
+    int y_;
+    int size_;
+    bool is_chosen_ = false;
+    int largest_ = 0;
+    Tower_stack* t_stack_;
+public:
+    Tower(int size, tower_type type, int x, int y, bool fill = false) : t_stack_(new Tower_stack()), x_(x), y_(y), size_(size)
+    {
+        if (type == standard) {
+            largest_ = size * 2 + 1;
+            if (fill) {
+                for (int i = size; i > 0; i--) {
+                    t_stack_->push(i * 2 + 1, LightCyan);
+                }
+            }
+        }
+    }
+
+    int get_x() {
+        return x_;
+    }
+    int get_y() {
+        return y_;
+    }
+
+    Tower_stack* get_stack() {
+        return t_stack_;
+    }
+
+    void toggle() {
+        console_gotoxy(x_ + (largest_ - 1) / 2, y_ + size_ + 3);
+        if (is_chosen_) {
+            is_chosen_ = false;
+            std::cout << ' ';
+        }
+        else {
+            is_chosen_ = true;
+            std::cout << '^';
+        }
+    }
+
+    Ring* raise() {
+        Ring* ring = t_stack_->pop();
+        console_gotoxy(x_ + (largest_ - ring->width_) / 2, y_ - 1);
+        console_set_text_color(ring->color_, Black);
+        for (int i = 0; i < ring->width_; i++) {
+            std::cout << ch;
+        }
+        console_set_text_color(White, Black);
+        console_gotoxy(x_, y_ + size_ - t_stack_->get_size());
+        for (int i = 0; i < largest_; i++) {
+            std::cout << ' ';
+            if (i == (largest_ - 1) / 2 - 1) std::cout << '|';
+        }
+        return ring;
+    }
+
+    void put(Ring* ring, Tower* raised) {
+        if (raised != nullptr) {
+            t_stack_->push(ring->width_, ring->color_);
+            draw();
+            console_gotoxy(raised->get_x(), raised->get_y() - 1);
+            for (int i = 0; i < largest_; i++) {
+                std::cout << ' ';
+            }
+        }
+    }
+
+    int get_largest() {
+        return largest_;
+    }
+
+    int get_size() {
+        return size_;
+    }
+
+    void draw() {
+        int x = x_, y = y_;
+        Ring* tmp = t_stack_->peek();
+        console_gotoxy(x, y);
+        for (int i = 0; i < size_ - t_stack_->get_size() + 1; i++) {
+            for (int j = 0; j < (largest_ - 1) / 2; j++) {
+                std::cout << ' ';
+            }
+            std::cout << '|';
+            console_gotoxy(x, ++y);
+        }
+        while (tmp != nullptr) {
+            for (int i = 0; i < (largest_ - tmp->width_) / 2; i++) {
+                std::cout << ' ';
+            }
+            if (tmp->width_ == 0) std::cout << '|';
+            else {
+                console_set_text_color(tmp->color_, Black);
+                for (int i = 0; i < tmp->width_; i++) {
+                    std::cout << ch;
+                }
+                console_set_text_color(White, Black);
+            }
+            tmp = tmp->prev_;
+            console_gotoxy(x, ++y);
+        }
+        for (int j = 0; j < (largest_ - 1) / 2; j++) {
+            std::cout << ' ';
+        }
+        std::cout << '|';
+    }
+};
+
+enum MoveDirection {
+    kUnknown, kLeft, kRight, kUp, kDown
+};
+
+class Game {
+
+    int toggled_ = 0;
+    bool is_game_started_ = false;
+    bool is_solving_ = false;
+    bool started_solving_ = false;
+    Tower* tower_[3];
+public:
+    void solve() {
+        if (is_game_started_ && !is_solving_) {
+            if (!(tower_[0]->get_stack()->get_size() > 0 && tower_[1]->get_stack()->get_size() == 0 && tower_[2]->get_stack()->get_size() == 0)) {
+                console_gotoxy(0, 0);
+                std::cout << "I can only solve from starting position, sorry :(";
+            }
+            else {
+                is_solving_ = true;
+                draw();
+                console_gotoxy(0, 0);
+                std::cout << "Solving in progress";
+                solve_for(tower_, 0, 2);
+            }
+        }
+    }
+
+    void solve_for(Tower* tower[3], int from, int to) {
+        Tower_stack* stack = tower[from]->get_stack();
+        if (stack->get_size() != 0) {
+            Ring* ring = stack->peek();
+            int length = 1;
+            while (ring->prev_ != nullptr && ring->width_ == ring->prev_->width_ - 2) {
+                ++length;
+                ring = ring->prev_;
+            }
+            int alt_to;
+            if (from != 0 && to != 0) alt_to = 0;
+            else if (from != 1 && to != 1) alt_to = 1;
+            else alt_to = 2;
+            int t;
+            if (length % 2 == 0) {
+                t = to;
+                to = alt_to;
+                alt_to = t;
+            }
+            ring = stack->peek();
+            bool width_cond = true;
+            while (ring != nullptr && width_cond) {
+                if (ring->prev_ != nullptr) width_cond = ring->width_ == ring->prev_->width_ - 2;
+                time_raise(tower[from], tower[to]);
+                if (tower[alt_to]->get_stack()->peek() != nullptr) 
+                    if (tower[to]->get_stack()->peek() == nullptr) solve_for(tower, alt_to, to);
+                    else if (tower[alt_to]->get_stack()->peek()->width_ < tower[to]->get_stack()->peek()->width_) solve_for(tower, alt_to, to);
+                t = to;
+                to = alt_to;
+                alt_to = t;
+                ring = ring->prev_;
+            }
+        }
+    }
+
+    int time_raise(Tower* tower_from, Tower* tower_to) {
+        std::chrono::steady_clock::duration start_interval = std::chrono::milliseconds{ 250 };
+        auto last_update_time = std::chrono::steady_clock::now();
+        bool raised = false;
+        Ring* res = nullptr;
+        while (true) {
+            if (std::chrono::steady_clock::now() - last_update_time > start_interval) {
+                if (raised) {
+                    tower_to->put(res, tower_from);
+                    return 0;
+                }
+                if (!raised) res = tower_from->raise();
+                last_update_time = std::chrono::steady_clock::now();
+                raised = true;
+            }
+        }
+    }
+    
+    void draw() {
+        if (is_game_started_) {
+            system("cls");
+            tower_[0]->draw();
+            tower_[1]->draw();
+            tower_[2]->draw();
+            tower_[0]->toggle();
+        }
+    }
+
+    void start() {
+        system("cls");
+        system("mode con lines=40 cols=120");
+        console_hide_cursor();
+        console_set_text_color(White, Black);
+
+        std::cout << "Choose the type of game:\n1 - standard\n2 - colored disks\n3 - magnetic";
+
+        MoveDirection ver_direction{ MoveDirection::kUnknown };
+        int hor_direction = 0;
+        tower_type choice = unknown;
+        WORD vk;
+        bool is_finish = false;
+        int size;
+        Ring* ring = nullptr;
+        Tower* raised = nullptr;
+        while (!is_finish) {
+            if (_kbhit()) {
+                vk = console_get_vk();
+
+                switch (vk) {
+                case VK_UP:
+                    ver_direction = MoveDirection::kUp;
+                    break;
+                case VK_DOWN:
+                    ver_direction = MoveDirection::kDown;
+                    break;
+                case VK_LEFT:
+                    hor_direction = -1;
+                    break;
+                case VK_RIGHT:
+                    hor_direction = +1;
+                    break;
+                case VK_NUMPAD1:
+                    choice = standard;
+                    break;
+                case VK_NUMPAD2:
+                    choice = colored;
+                    break;
+                case VK_NUMPAD3:
+                    choice = magnetic;
+                    break;
+                case VK_ESCAPE:
+                    is_finish = true;
+                    break;
+                case VK_SPACE:
+                    started_solving_ = true;
+                    break;
+                }
+            }
+            if (choice != unknown) {
+                if (!is_game_started_) {
+                    system("cls");
+                    std::cout << "Enter number of disks 1-10: ";
+                    bool is_correct_value = false;
+                    while (!is_correct_value) {
+                        std::cin >> size;
+                        if (size > 0 && size <= 10) is_correct_value = true;
+                        else {
+                            std::cout << "Please enter 1-10 numbers only." << std::endl;
+                            std::cin.clear();
+                            std::cin.ignore(10000, '\n');
+                        }
+                    }
+                    int y = 5, x = 3;
+                    tower_[0] = new Tower(size, choice, x, y, true);
+                    int largest = tower_[0]->get_largest();
+                    tower_[1] = new Tower(size, choice, x + largest + 3, y);
+                    tower_[2] = new Tower(size, choice, (x + largest + 3) * 2, y);
+                    is_game_started_ = true;
+                    draw();
+                    console_gotoxy(0, 0);
+                    std::cout << "Press Space to solve";
+                }
+                if (!is_solving_) {
+                    if (hor_direction) {
+                        tower_[toggled_]->toggle();
+                        toggled_ += hor_direction;
+                        if (toggled_ == -1) toggled_ = 2;
+                        if (toggled_ == 3) toggled_ = 0;
+                        tower_[toggled_]->toggle();
+                        hor_direction = 0;
+                    }
+                    if (ver_direction) {
+                        if (ver_direction == kUp && tower_[toggled_]->get_stack()->get_size() > 0 && raised == nullptr) {
+                            ring = tower_[toggled_]->raise();
+                            raised = tower_[toggled_];
+                        }
+                        if (ver_direction == kDown && (tower_[toggled_]->get_stack()->peek() == nullptr || ring->width_ < tower_[toggled_]->get_stack()->peek()->width_)) {
+                            tower_[toggled_]->put(ring, raised);
+                            raised = nullptr;
+                        }
+                        ver_direction = kUnknown;
+                    }
+                    if (started_solving_) solve();
+                }
+            }
+        }
+    }
+};
+
+
+int main()
+{
+    Game game = Game();
+    game.start();
+
+
+    return 0;
+}
